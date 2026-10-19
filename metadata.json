@@ -1,0 +1,6 @@
+{
+  "name": "RadLocate — Radiodiagnosis & Positioning Trainer",
+  "description": "Interactive clinical training game for radiodiagnosis students featuring cursor-based Central Ray positioning, collimation alignment, and pathology localization across diagnostic radiographs and CT scans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
