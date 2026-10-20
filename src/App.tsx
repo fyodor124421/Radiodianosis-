@@ -15,13 +15,24 @@ import {
   ChevronRight,
   Target,
   AlertTriangle,
+  PlusCircle,
+  UserCheck,
 } from 'lucide-react';
-import { RADIOLOGY_CASES, RadiologyCase } from './data/radiologyCases';
+import {
+  RADIOLOGY_CASES,
+  RadiologyCase,
+  PatientPoseConfig,
+} from './data/radiologyCases';
 import { PositioningCanvas } from './components/PositioningCanvas';
 import { RadiographViewer } from './components/RadiographViewer';
 import { soundEngine } from './utils/soundEffects';
 
-type ActiveSection = 'workbench' | 'positioning-guide' | 'sign-atlas' | 'performance';
+type ActiveSection =
+  | 'workbench'
+  | 'create-position'
+  | 'positioning-guide'
+  | 'sign-atlas'
+  | 'performance';
 type CaseStage = 'positioning' | 'diagnosis';
 
 export interface CaseAttemptResult {
@@ -31,6 +42,7 @@ export interface CaseAttemptResult {
   crOffsetMm: number;
   isCRAccurate: boolean;
   positioningScore: number; // out of 25
+  poseMatchesCount: number; // out of 5 pose parameters
   lesionScore: number; // out of 25
   lesionOffsetMm: number;
   isLesionAccurate: boolean;
@@ -41,14 +53,55 @@ export interface CaseAttemptResult {
   isCorrectPositioning: boolean;
 }
 
+const DEFAULT_USER_POSE: PatientPoseConfig = {
+  bodyPosture: 'Supine',
+  projectionView: 'AP',
+  specialManeuver: 'Neutral Standard',
+  tubeAngleDeg: 0,
+  respirationPhase: 'Suspended / Immobility',
+};
+
+const BODY_POSTURES: PatientPoseConfig['bodyPosture'][] = [
+  'Erect',
+  'Supine',
+  'Prone',
+  'Lateral Decubitus',
+];
+
+const PROJECTION_VIEWS: PatientPoseConfig['projectionView'][] = [
+  'PA',
+  'AP',
+  'True Lateral',
+  'Axial CT',
+];
+
+const SPECIAL_MANEUVERS: PatientPoseConfig['specialManeuver'][] = [
+  'Neutral Standard',
+  'Shoulders Rolled Forward',
+  'Ulnar Deviation (20°)',
+  'Open-Mouth Transoral',
+  'OML Parallel (No Contrast)',
+  'Chin Slightly Extended',
+  'Radioulnar Superimposed (90°)',
+];
+
+const RESPIRATION_PHASES: PatientPoseConfig['respirationPhase'][] = [
+  'Full Inspiration',
+  'Full Expiration',
+  'Suspended / Immobility',
+  'Phonate "Ahhh"',
+];
+
 export default function App() {
+  const [casesList, setCasesList] = useState<RadiologyCase[]>(RADIOLOGY_CASES);
   const [activeSection, setActiveSection] = useState<ActiveSection>('workbench');
   const [selectedSubspecialty, setSelectedSubspecialty] = useState<string>('All');
   const [currentCaseIndex, setCurrentCaseIndex] = useState<number>(0);
   const [activeStage, setActiveStage] = useState<CaseStage>('positioning');
 
-  // Interactive Cursor & Form State for Current Case
+  // Interactive Cursor & Patient Position Builder State for Current Case
   const [placedCR, setPlacedCR] = useState<{ x: number; y: number } | null>(null);
+  const [userPose, setUserPose] = useState<PatientPoseConfig>(DEFAULT_USER_POSE);
   const [selectedPositioningId, setSelectedPositioningId] = useState<string>('');
   const [collimationScale, setCollimationScale] = useState<number>(100);
   const [step1Checked, setStep1Checked] = useState<boolean>(false);
@@ -62,23 +115,58 @@ export default function App() {
   const [isSubmitted, setIsSubmitted] = useState<boolean>(false);
   const [history, setHistory] = useState<Record<string, CaseAttemptResult>>({});
 
+  // State for Custom Patient Position & Case Creator Studio
+  const [customTitle, setCustomTitle] = useState<string>(
+    'Suspected Left Lower Lobe Pneumonia — Position for PA Chest'
+  );
+  const [customAgeSex, setCustomAgeSex] = useState<string>('42M');
+  const [customSubspecialty, setCustomSubspecialty] =
+    useState<RadiologyCase['subspecialty']>('Thoracic');
+  const [customScanType, setCustomScanType] =
+    useState<RadiologyCase['scanType']>('chest_pneumothorax');
+  const [customLandmarkName, setCustomLandmarkName] = useState<string>(
+    'T7 Spinous Process (Mid-Thorax)'
+  );
+  const [customTargetCR, setCustomTargetCR] = useState<{ x: number; y: number }>({
+    x: 50,
+    y: 36,
+  });
+  const [customPose, setCustomPose] = useState<PatientPoseConfig>({
+    bodyPosture: 'Erect',
+    projectionView: 'PA',
+    specialManeuver: 'Shoulders Rolled Forward',
+    tubeAngleDeg: 0,
+    respirationPhase: 'Full Inspiration',
+  });
+  const [customDisease, setCustomDisease] = useState<string>(
+    'Right-Sided Tension Pneumothorax'
+  );
+  const [customSign, setCustomSign] = useState<string>(
+    'Visceral Pleural Line & Contralateral Mediastinal Shift'
+  );
+  const [customTargetLesion, setCustomTargetLesion] = useState<{ x: number; y: number }>({
+    x: 31,
+    y: 38,
+  });
+
   // Filtered cases by subspecialty
   const filteredCases = useMemo(() => {
-    if (selectedSubspecialty === 'All') return RADIOLOGY_CASES;
-    return RADIOLOGY_CASES.filter((c) => c.subspecialty === selectedSubspecialty);
-  }, [selectedSubspecialty]);
+    if (selectedSubspecialty === 'All') return casesList;
+    return casesList.filter((c) => c.subspecialty === selectedSubspecialty);
+  }, [selectedSubspecialty, casesList]);
 
   const currentCase: RadiologyCase =
-    filteredCases[currentCaseIndex] || filteredCases[0] || RADIOLOGY_CASES[0];
+    filteredCases[currentCaseIndex] || filteredCases[0] || casesList[0];
 
   const subspecialties = useMemo(() => {
     const set = new Set<string>(['All']);
-    RADIOLOGY_CASES.forEach((c) => set.add(c.subspecialty));
+    casesList.forEach((c) => set.add(c.subspecialty));
     return Array.from(set);
-  }, []);
+  }, [casesList]);
 
   const resetCaseInputs = () => {
     setPlacedCR(null);
+    setUserPose(DEFAULT_USER_POSE);
     setSelectedPositioningId('');
     setCollimationScale(100);
     setStep1Checked(false);
@@ -119,14 +207,52 @@ export default function App() {
     setActiveSection('workbench');
   };
 
+  // Sync preset option card click with the interactive Patient Position Builder
+  const handleSelectPositioningOption = (optId: string) => {
+    setSelectedPositioningId(optId);
+    if (optId === currentCase.correctPositioningId) {
+      setUserPose({ ...currentCase.targetPatientPose });
+    }
+  };
+
+  // Compare user-constructed PatientPoseConfig against currentCase.targetPatientPose
+  const evaluatePatientPose = (pose: PatientPoseConfig, target: PatientPoseConfig) => {
+    const postureMatch = pose.bodyPosture === target.bodyPosture;
+    const viewMatch = pose.projectionView === target.projectionView;
+    const maneuverMatch = pose.specialManeuver === target.specialManeuver;
+    const angleMatch = Math.abs(pose.tubeAngleDeg - target.tubeAngleDeg) <= 5;
+    const respMatch = pose.respirationPhase === target.respirationPhase;
+
+    const matchesCount = [
+      postureMatch,
+      viewMatch,
+      maneuverMatch,
+      angleMatch,
+      respMatch,
+    ].filter(Boolean).length;
+
+    return {
+      postureMatch,
+      viewMatch,
+      maneuverMatch,
+      angleMatch,
+      respMatch,
+      matchesCount,
+      scoreOutOf25: matchesCount * 5,
+    };
+  };
+
+  const poseEval = evaluatePatientPose(userPose, currentCase.targetPatientPose);
+
   // Immediate check for Step 1 (Positioning & Central Ray Cursor)
   const handleCheckStep1 = () => {
-    if (!placedCR && !selectedPositioningId) return;
     const crDist = placedCR
       ? Math.hypot(placedCR.x - currentCase.targetCR.x, placedCR.y - currentCase.targetCR.y)
       : 999;
     const crOk = crDist <= currentCase.targetCR.toleranceRadius;
-    const posOk = selectedPositioningId === currentCase.correctPositioningId;
+    const posOk =
+      poseEval.matchesCount >= 4 ||
+      selectedPositioningId === currentCase.correctPositioningId;
 
     if (crOk && posOk) {
       soundEngine.playSuccessEval();
@@ -136,7 +262,7 @@ export default function App() {
     setStep1Checked(true);
   };
 
-  // Evaluate full case (works even if user only answered part of the steps so they can always see if their answer is correct)
+  // Evaluate full case
   const handleEvaluateCase = () => {
     // 1. CR Cursor Placement Score (0-25) via Euclidean distance formula
     const crDist = placedCR
@@ -158,9 +284,12 @@ export default function App() {
       }
     }
 
-    // 2. Positioning & Projection Selection Score (0-25)
-    const isCorrectPositioning = selectedPositioningId === currentCase.correctPositioningId;
-    const positioningScore = isCorrectPositioning ? 25 : 0;
+    // 2. Constructed Patient Position Score (0-25)
+    const isPresetExact = selectedPositioningId === currentCase.correctPositioningId;
+    const positioningScore = isPresetExact
+      ? 25
+      : Math.max(poseEval.scoreOutOf25, selectedPositioningId ? 5 : 0);
+    const isCorrectPositioning = positioningScore >= 20;
 
     // 3. Lesion Cursor Localization Score (0-25) via Euclidean distance formula
     const lesionDist = placedLesion
@@ -203,6 +332,7 @@ export default function App() {
       crOffsetMm,
       isCRAccurate,
       positioningScore,
+      poseMatchesCount: isPresetExact ? 5 : poseEval.matchesCount,
       lesionScore,
       lesionOffsetMm,
       isLesionAccurate,
@@ -227,6 +357,73 @@ export default function App() {
     }
   };
 
+  // Save a newly created Custom Patient Position Case and launch it immediately
+  const handleCreateCustomCase = (e: React.FormEvent) => {
+    e.preventDefault();
+    const templateCase =
+      RADIOLOGY_CASES.find((c) => c.scanType === customScanType) || RADIOLOGY_CASES[0];
+    const newCaseNum = `CASE 0${casesList.length + 1}`;
+    const newCaseId = `custom-case-${Date.now()}`;
+
+    const createdCase: RadiologyCase = {
+      ...templateCase,
+      id: newCaseId,
+      caseNumber: newCaseNum,
+      subspecialty: customSubspecialty,
+      difficulty: 'Custom Case',
+      patientInfo: {
+        ageSex: customAgeSex || '35M',
+        chiefComplaint: customTitle,
+        clinicalHistory: `Custom student-designed positioning & diagnosis scenario requiring ${customPose.bodyPosture} ${customPose.projectionView} positioning with ${customPose.specialManeuver}.`,
+        vitals: 'HR 82 bpm · BP 122/78 mmHg · SpO2 98% RA',
+      },
+      positioningPrompt: `Create the custom patient position (${customPose.bodyPosture}, ${customPose.projectionView}, ${customPose.specialManeuver}, CR ${customPose.tubeAngleDeg}°) and place the Central Ray cursor at ${customLandmarkName}.`,
+      targetCR: {
+        x: customTargetCR.x,
+        y: customTargetCR.y,
+        toleranceRadius: 8,
+        landmarkName: customLandmarkName,
+        collimationWidth: 55,
+        collimationHeight: 50,
+      },
+      targetPatientPose: { ...customPose },
+      correctPositioningId: 'custom-optimal-pos',
+      positioningOptions: [
+        {
+          id: 'custom-optimal-pos',
+          projectionName: `${customPose.projectionView} ${customPose.bodyPosture} (${customPose.specialManeuver})`,
+          patientPosture: `${customPose.bodyPosture} posture with ${customPose.specialManeuver}`,
+          tubeAngle: `${customPose.tubeAngleDeg}° Central Ray to ${customLandmarkName}`,
+          respiration: customPose.respirationPhase,
+        },
+        ...templateCase.positioningOptions.slice(1, 4),
+      ],
+      positioningExplanation: `Custom positioning protocol: ${customPose.bodyPosture} ${customPose.projectionView} projection with ${customPose.specialManeuver}, ${customPose.tubeAngleDeg}° tube angle, and ${customPose.respirationPhase} centered at ${customLandmarkName}.`,
+      targetLesion: {
+        ...templateCase.targetLesion,
+        x: customTargetLesion.x,
+        y: customTargetLesion.y,
+      },
+      correctDisease: customDisease,
+      diseaseOptions: Array.from(
+        new Set([customDisease, ...templateCase.diseaseOptions])
+      ).slice(0, 4),
+      correctSign: customSign,
+      signOptions: Array.from(new Set([customSign, ...templateCase.signOptions])).slice(
+        0,
+        4
+      ),
+    };
+
+    const updated = [...casesList, createdCase];
+    setCasesList(updated);
+    setSelectedSubspecialty('All');
+    setCurrentCaseIndex(updated.length - 1);
+    resetCaseInputs();
+    soundEngine.playSuccessEval();
+    setActiveSection('workbench');
+  };
+
   // Live Step 1 evaluation metrics
   const step1CrDist = placedCR
     ? Math.hypot(placedCR.x - currentCase.targetCR.x, placedCR.y - currentCase.targetCR.y)
@@ -234,7 +431,10 @@ export default function App() {
   const step1CrOffsetMm = step1CrDist !== null ? Math.round(step1CrDist * 6.5) : null;
   const step1CrCorrect =
     step1CrDist !== null && step1CrDist <= currentCase.targetCR.toleranceRadius;
-  const step1PosCorrect = selectedPositioningId === currentCase.correctPositioningId;
+  const step1PosScore =
+    selectedPositioningId === currentCase.correctPositioningId
+      ? 25
+      : poseEval.scoreOutOf25;
 
   // Aggregate rotation metrics
   const completedResults = Object.values(history) as CaseAttemptResult[];
@@ -246,15 +446,8 @@ export default function App() {
       : 0;
 
   const currentResult = history[currentCase.id];
-  const isPhase1Ready = Boolean(placedCR && selectedPositioningId);
+  const isPhase1Ready = Boolean(placedCR && (poseEval.matchesCount >= 3 || selectedPositioningId));
   const isPhase2Ready = Boolean(placedLesion && selectedDisease && selectedSign);
-  const hasAnyAnswerInput = Boolean(
-    placedCR || selectedPositioningId || placedLesion || selectedDisease || selectedSign
-  );
-
-  const optimalPositioningOption = currentCase.positioningOptions.find(
-    (o) => o.id === currentCase.correctPositioningId
-  );
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0F172A] text-slate-100">
@@ -272,7 +465,7 @@ export default function App() {
           RadLocate
         </a>
 
-        {/* Zone 2: 4 concise single-line text navigation links */}
+        {/* Zone 2: 5 concise single-line text navigation links */}
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
           <a
             href="#workbench"
@@ -285,6 +478,18 @@ export default function App() {
             }`}
           >
             Clinical Cases
+          </a>
+          <a
+            href="#create-position"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveSection('create-position');
+            }}
+            className={`hover:text-slate-100 hover:underline underline-offset-4 transition-colors whitespace-nowrap shrink-0 ${
+              activeSection === 'create-position' ? 'text-sky-400 underline' : ''
+            }`}
+          >
+            Create Position
           </a>
           <a
             href="#positioning-guide"
@@ -363,12 +568,21 @@ export default function App() {
           </div>
 
           {/* Unboxed Metadata & Utility Toggles */}
-          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
             <div className="font-mono tabular-nums text-slate-300">
-              <span>Completed: {completedResults.length}/{RADIOLOGY_CASES.length} Cases</span>
+              <span>Completed: {completedResults.length}/{casesList.length} Cases</span>
               <span className="mx-2 text-slate-600">·</span>
               <span>Mean Score: {averageScore}/100</span>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveSection('create-position')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 text-xs font-medium transition-colors whitespace-nowrap shrink-0"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>Create Custom Position</span>
+            </button>
 
             <button
               type="button"
@@ -389,7 +603,11 @@ export default function App() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-950 border border-slate-800 text-slate-300 hover:text-white transition-colors whitespace-nowrap shrink-0"
               aria-label="Toggle Workstation Audio"
             >
-              {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-sky-400" /> : <VolumeX className="w-3.5 h-3.5 text-slate-500" />}
+              {soundEnabled ? (
+                <Volume2 className="w-3.5 h-3.5 text-sky-400" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 text-slate-500" />
+              )}
               <span>{soundEnabled ? 'Audio On' : 'Muted'}</span>
             </button>
           </div>
@@ -439,7 +657,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Two-Zone Sandbox Layout: Left Interactive Cursor Stage (60%), Right Clinical & Assessment Deck (40%) */}
+            {/* Two-Zone Sandbox Layout: Left Interactive Cursor Stage (60%), Right Clinical & Patient Position Builder Deck (40%) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
               {/* LEFT ZONE: Interactive Cursor Canvas (7 columns on 12-col grid) */}
               <div className="lg:col-span-7 flex flex-col rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
@@ -456,7 +674,7 @@ export default function App() {
                       }`}
                     >
                       <Compass className="w-3.5 h-3.5" />
-                      <span>1. Positioning & CR Cursor</span>
+                      <span>1. Create Patient Position & CR</span>
                       {isPhase1Ready && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />}
                     </button>
 
@@ -480,8 +698,8 @@ export default function App() {
 
                   <div className="text-xs text-slate-400 hidden sm:block">
                     {activeStage === 'positioning'
-                      ? 'Step 1 of 2: Place Central Ray (CR)'
-                      : 'Step 2 of 2: Click Pathology on Scan'}
+                      ? 'Step 1: Pose Patient & Click Central Ray'
+                      : 'Step 2: Click Pathology on Scan'}
                   </div>
                 </div>
 
@@ -490,8 +708,8 @@ export default function App() {
                   <div className="space-y-1">
                     <div className="text-xs font-semibold text-sky-400">
                       {activeStage === 'positioning'
-                        ? 'Required Positioning & Central Ray Task'
-                        : 'Required Radiograph Localization Task'}
+                        ? 'Interactive Patient Position & Central Ray Task'
+                        : 'Interactive Radiograph Localization Task'}
                     </div>
                     <p className="text-sm text-slate-200 leading-relaxed">
                       {activeStage === 'positioning'
@@ -508,6 +726,7 @@ export default function App() {
                       currentCase={currentCase}
                       placedCR={placedCR}
                       onPlaceCR={handlePlaceCR}
+                      userPose={userPose}
                       collimationScale={collimationScale}
                       isSubmitted={isSubmitted || step1Checked}
                     />
@@ -523,10 +742,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* RIGHT ZONE: Clinical Requisition, Positioning Controls & Diagnosis Deck (5 columns) */}
+              {/* RIGHT ZONE: Clinical Requisition, Interactive Patient Position Creator & Diagnosis Deck (5 columns) */}
               <div className="lg:col-span-5 flex flex-col gap-5">
                 {/* Clinical Requisition Header Card */}
-                <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50 space-y-3">
+                <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50 space-y-2.5">
                   <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
                     <span>Clinical Requisition · {currentCase.caseNumber}</span>
                     <span className="font-mono tabular-nums text-slate-300">
@@ -534,11 +753,11 @@ export default function App() {
                     </span>
                   </div>
 
-                  <h1 className="font-display text-xl font-bold text-slate-100 leading-snug">
+                  <h1 className="font-display text-lg font-bold text-slate-100 leading-snug">
                     {currentCase.patientInfo.chiefComplaint}
                   </h1>
 
-                  <p className="text-sm text-slate-300 leading-relaxed">
+                  <p className="text-xs text-slate-300 leading-relaxed">
                     {currentCase.patientInfo.clinicalHistory}
                   </p>
 
@@ -547,18 +766,17 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Interactive Controls Card (Adapts to Stage) */}
+                {/* Interactive Controls Card */}
                 {activeStage === 'positioning' ? (
-                  <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50 space-y-5 flex-1 flex flex-col justify-between">
+                  <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50 space-y-4 flex-1 flex flex-col justify-between">
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
-                        <h2 className="font-display text-base font-semibold text-slate-100">
-                          Step 1: Patient Positioning & Collimation
+                        <h2 className="font-display text-base font-semibold text-slate-100 flex items-center gap-2">
+                          <UserCheck className="w-4 h-4 text-sky-400" />
+                          <span>Create the Patient Position</span>
                         </h2>
-                        <span className="text-xs font-mono text-slate-400 tabular-nums">
-                          {placedCR
-                            ? `CR Pin: (${placedCR.x.toFixed(0)}%, ${placedCR.y.toFixed(0)}%)`
-                            : 'Awaiting CR Click'}
+                        <span className="text-xs font-mono text-sky-300 tabular-nums">
+                          Pose Match: {poseEval.matchesCount}/5
                         </span>
                       </div>
 
@@ -566,90 +784,280 @@ export default function App() {
                       {(step1Checked || isSubmitted) && (
                         <div className="p-3.5 rounded-lg border border-slate-700 bg-slate-950/90 space-y-2 text-xs">
                           <div className="font-semibold text-slate-100 flex items-center justify-between">
-                            <span>Step 1 Answer Verification</span>
+                            <span>Step 1 Positioning & CR Inspection</span>
                             <span className="font-mono text-sky-400">
                               {(step1CrCorrect ? 25 : step1CrOffsetMm && step1CrOffsetMm < 90 ? 15 : 0) +
-                                (step1PosCorrect ? 25 : 0)}{' '}
+                                step1PosScore}{' '}
                               / 50 pts
                             </span>
                           </div>
                           <div className="space-y-1.5 pt-1 border-t border-slate-800">
                             <div className="flex items-start justify-between gap-2">
-                              <span className="text-slate-400">Central Ray Cursor:</span>
+                              <span className="text-slate-400">1. Central Ray Cursor:</span>
                               {step1CrCorrect ? (
                                 <span className="text-emerald-400 font-medium flex items-center gap-1">
                                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                                  Correct ({step1CrOffsetMm} mm from {currentCase.targetCR.landmarkName.split('(')[0].trim()})
+                                  Correct ({step1CrOffsetMm} mm offset)
                                 </span>
                               ) : (
                                 <span className="text-amber-400 font-medium flex items-center gap-1 text-right">
                                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                                   {placedCR
                                     ? `Off by ${step1CrOffsetMm} mm (Target: ${currentCase.targetCR.landmarkName})`
-                                    : `Not clicked on canvas (Target: ${currentCase.targetCR.landmarkName})`}
+                                    : `Click canvas to place CR at ${currentCase.targetCR.landmarkName}`}
                                 </span>
                               )}
                             </div>
+
                             <div className="flex items-start justify-between gap-2">
-                              <span className="text-slate-400">Selected Projection:</span>
-                              {step1PosCorrect ? (
-                                <span className="text-emerald-400 font-medium flex items-center gap-1">
-                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                                  Correct ({optimalPositioningOption?.projectionName})
-                                </span>
-                              ) : (
-                                <span className="text-rose-400 font-medium flex items-center gap-1 text-right">
-                                  <XCircle className="w-3.5 h-3.5 shrink-0" />
-                                  Incorrect — Correct: {optimalPositioningOption?.projectionName}
-                                </span>
-                              )}
+                              <span className="text-slate-400">2. Created Patient Position:</span>
+                              <span
+                                className={
+                                  step1PosScore >= 20
+                                    ? 'text-emerald-400 font-medium'
+                                    : 'text-amber-400 font-medium'
+                                }
+                              >
+                                {step1PosScore}/25 pts (Ideal: {currentCase.targetPatientPose.bodyPosture} ·{' '}
+                                {currentCase.targetPatientPose.projectionView} ·{' '}
+                                {currentCase.targetPatientPose.specialManeuver})
+                              </span>
                             </div>
                           </div>
                         </div>
                       )}
 
-                      {/* Labeled Collimation Shutter Slider */}
-                      <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800/90 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <label
-                            htmlFor="collimation-slider"
-                            className="font-medium text-slate-300 flex items-center gap-1.5"
-                          >
-                            <Sliders className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Collimator Light Field Aperture</span>
-                          </label>
-                          <span className="font-mono tabular-nums text-amber-300">
-                            Field Scale: {collimationScale}%
-                          </span>
+                      {/* INTERACTIVE PATIENT POSE SCULPTOR / BUILDER */}
+                      <div className="p-3.5 rounded-lg bg-slate-950/80 border border-slate-800 space-y-3.5">
+                        {/* 1. Body Posture Selector */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 font-medium">1. Patient Body Posture:</span>
+                            {(step1Checked || isSubmitted) && (
+                              <span
+                                className={`font-mono text-[11px] ${
+                                  poseEval.postureMatch ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {poseEval.postureMatch
+                                  ? '✓ Correct'
+                                  : `Target: ${currentCase.targetPatientPose.bodyPosture}`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                            {BODY_POSTURES.map((posture) => (
+                              <button
+                                key={posture}
+                                type="button"
+                                disabled={isSubmitted}
+                                onClick={() =>
+                                  setUserPose((p) => ({ ...p, bodyPosture: posture }))
+                                }
+                                className={`px-2.5 py-1.5 rounded text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                                  userPose.bodyPosture === posture
+                                    ? 'bg-sky-600 border-sky-500 text-white'
+                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                {posture}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                        <input
-                          id="collimation-slider"
-                          type="range"
-                          min={60}
-                          max={130}
-                          step={5}
-                          disabled={isSubmitted}
-                          value={collimationScale}
-                          onChange={(e) => setCollimationScale(Number(e.target.value))}
-                          className="w-full accent-sky-500 cursor-pointer"
-                        />
-                        <div className="flex justify-between text-[11px] text-slate-500 font-mono">
-                          <span>60% (Tight)</span>
-                          <span>100% (Optimal ALARA)</span>
-                          <span>130% (Wide)</span>
+
+                        {/* 2. Beam / Receptor Projection View */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 font-medium">
+                              2. Beam / Receptor Projection:
+                            </span>
+                            {(step1Checked || isSubmitted) && (
+                              <span
+                                className={`font-mono text-[11px] ${
+                                  poseEval.viewMatch ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {poseEval.viewMatch
+                                  ? '✓ Correct'
+                                  : `Target: ${currentCase.targetPatientPose.projectionView}`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                            {PROJECTION_VIEWS.map((view) => (
+                              <button
+                                key={view}
+                                type="button"
+                                disabled={isSubmitted}
+                                onClick={() =>
+                                  setUserPose((p) => ({ ...p, projectionView: view }))
+                                }
+                                className={`px-2.5 py-1.5 rounded text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                                  userPose.projectionView === view
+                                    ? 'bg-sky-600 border-sky-500 text-white'
+                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                {view}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 3. Anatomical Joint / Part Positioning Maneuver */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 font-medium">
+                              3. Joint / Part Positioning Maneuver:
+                            </span>
+                            {(step1Checked || isSubmitted) && (
+                              <span
+                                className={`font-mono text-[11px] ${
+                                  poseEval.maneuverMatch ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {poseEval.maneuverMatch
+                                  ? '✓ Correct'
+                                  : `Target: ${currentCase.targetPatientPose.specialManeuver}`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {SPECIAL_MANEUVERS.map((maneuver) => (
+                              <button
+                                key={maneuver}
+                                type="button"
+                                disabled={isSubmitted}
+                                onClick={() =>
+                                  setUserPose((p) => ({ ...p, specialManeuver: maneuver }))
+                                }
+                                className={`px-2.5 py-1.5 rounded text-[11px] font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                                  userPose.specialManeuver === maneuver
+                                    ? 'bg-sky-600 border-sky-500 text-white'
+                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                {maneuver}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 4. X-Ray Tube Tilt & Collimation Sliders */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <label
+                                htmlFor="tube-angle-slider"
+                                className="text-slate-300 font-medium"
+                              >
+                                4. Tube Tilt Angle:
+                              </label>
+                              <span className="font-mono text-sky-300 tabular-nums">
+                                {userPose.tubeAngleDeg === 0
+                                  ? '0° Perp'
+                                  : userPose.tubeAngleDeg > 0
+                                  ? `+${userPose.tubeAngleDeg}° Ceph`
+                                  : `${userPose.tubeAngleDeg}° Caud`}
+                              </span>
+                            </div>
+                            <input
+                              id="tube-angle-slider"
+                              type="range"
+                              min={-30}
+                              max={30}
+                              step={5}
+                              disabled={isSubmitted}
+                              value={userPose.tubeAngleDeg}
+                              onChange={(e) =>
+                                setUserPose((p) => ({
+                                  ...p,
+                                  tubeAngleDeg: Number(e.target.value),
+                                }))
+                              }
+                              className="w-full accent-sky-500 cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <label
+                                htmlFor="collimation-slider"
+                                className="text-slate-300 font-medium flex items-center gap-1"
+                              >
+                                <Sliders className="w-3 h-3 text-amber-400" />
+                                <span>Collimation Field:</span>
+                              </label>
+                              <span className="font-mono text-amber-300 tabular-nums">
+                                {collimationScale}%
+                              </span>
+                            </div>
+                            <input
+                              id="collimation-slider"
+                              type="range"
+                              min={60}
+                              max={130}
+                              step={5}
+                              disabled={isSubmitted}
+                              value={collimationScale}
+                              onChange={(e) => setCollimationScale(Number(e.target.value))}
+                              className="w-full accent-sky-500 cursor-pointer"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 5. Patient Respiration Instruction */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-300 font-medium">
+                              5. Patient Respiration Instruction:
+                            </span>
+                            {(step1Checked || isSubmitted) && (
+                              <span
+                                className={`font-mono text-[11px] ${
+                                  poseEval.respMatch ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {poseEval.respMatch
+                                  ? '✓ Correct'
+                                  : `Target: ${currentCase.targetPatientPose.respirationPhase}`}
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {RESPIRATION_PHASES.map((resp) => (
+                              <button
+                                key={resp}
+                                type="button"
+                                disabled={isSubmitted}
+                                onClick={() =>
+                                  setUserPose((p) => ({ ...p, respirationPhase: resp }))
+                                }
+                                className={`px-2.5 py-1.5 rounded text-[11px] font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                                  userPose.respirationPhase === resp
+                                    ? 'bg-sky-600 border-sky-500 text-white'
+                                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                {resp}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
 
-                      {/* Projection & Posture Selection */}
-                      <div className="space-y-2">
-                        <div className="text-xs font-medium text-slate-300">
-                          Select Radiographic Projection & Patient Positioning:
+                      {/* Optional Quick-Apply Standard Projection Protocol Cards */}
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-medium text-slate-400">
+                          Or Quick-Apply a Standard Clinical Protocol Preset:
                         </div>
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-1 gap-1.5">
                           {currentCase.positioningOptions.map((opt) => {
                             const isSelected = selectedPositioningId === opt.id;
                             const isCorrect = opt.id === currentCase.correctPositioningId;
-                            let borderStyle = 'border-slate-800 bg-slate-950/60 hover:border-slate-700';
+                            let borderStyle =
+                              'border-slate-800 bg-slate-950/50 hover:border-slate-700';
                             if (step1Checked || isSubmitted) {
                               if (isCorrect) {
                                 borderStyle = 'border-emerald-500/70 bg-emerald-950/25';
@@ -665,8 +1073,8 @@ export default function App() {
                                 key={opt.id}
                                 type="button"
                                 disabled={isSubmitted}
-                                onClick={() => setSelectedPositioningId(opt.id)}
-                                className={`w-full text-left p-3 rounded-lg border transition-colors ${borderStyle}`}
+                                onClick={() => handleSelectPositioningOption(opt.id)}
+                                className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${borderStyle}`}
                               >
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-xs font-semibold text-slate-100">
@@ -678,18 +1086,6 @@ export default function App() {
                                       CORRECT
                                     </span>
                                   )}
-                                  {(step1Checked || isSubmitted) && isSelected && !isCorrect && (
-                                    <span className="text-[11px] font-mono text-rose-400 shrink-0 flex items-center gap-1">
-                                      <XCircle className="w-3.5 h-3.5" />
-                                      YOUR CHOICE
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                                  {opt.patientPosture}
-                                </p>
-                                <div className="mt-1.5 text-[11px] font-mono text-slate-400">
-                                  CR: {opt.tubeAngle} · Resp: {opt.respiration}
                                 </div>
                               </button>
                             );
@@ -702,15 +1098,10 @@ export default function App() {
                     <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
                       <button
                         type="button"
-                        disabled={!placedCR && !selectedPositioningId}
                         onClick={handleCheckStep1}
-                        className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
-                          placedCR || selectedPositioningId
-                            ? 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-600/30'
-                            : 'bg-slate-900 border-slate-800 text-slate-500 cursor-not-allowed'
-                        }`}
+                        className="px-3.5 py-2 text-xs font-semibold rounded-lg border bg-emerald-600/20 border-emerald-500/50 text-emerald-300 hover:bg-emerald-600/30 transition-colors whitespace-nowrap shrink-0"
                       >
-                        Check Positioning Answer
+                        Check Created Position & CR
                       </button>
 
                       <button
@@ -721,7 +1112,7 @@ export default function App() {
                         }}
                         className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-500 transition-colors whitespace-nowrap shrink-0"
                       >
-                        <span>Step 2: Inspect Scan & Diagnose</span>
+                        <span>Step 2: Expose & Inspect Scan</span>
                         <ChevronRight className="w-4 h-4" />
                       </button>
                     </div>
@@ -760,7 +1151,9 @@ export default function App() {
                               <span className="text-slate-400">1. CR Cursor Placement:</span>
                               <span
                                 className={
-                                  currentResult.isCRAccurate ? 'text-emerald-400 font-medium' : 'text-amber-400 font-medium'
+                                  currentResult.isCRAccurate
+                                    ? 'text-emerald-400 font-medium'
+                                    : 'text-amber-400 font-medium'
                                 }
                               >
                                 {placedCR
@@ -769,17 +1162,15 @@ export default function App() {
                               </span>
                             </div>
                             <div className="flex items-start justify-between gap-2">
-                              <span className="text-slate-400">2. Patient Positioning:</span>
+                              <span className="text-slate-400">2. Created Patient Position:</span>
                               <span
                                 className={
                                   currentResult.isCorrectPositioning
                                     ? 'text-emerald-400 font-medium'
-                                    : 'text-rose-400 font-medium'
+                                    : 'text-amber-400 font-medium'
                                 }
                               >
-                                {currentResult.isCorrectPositioning
-                                  ? '✓ Correct (25/25)'
-                                  : '✗ Incorrect (0/25)'}
+                                {currentResult.positioningScore}/25 pts ({currentResult.poseMatchesCount}/5 parameters matched)
                               </span>
                             </div>
                             <div className="flex items-start justify-between gap-2">
@@ -829,7 +1220,8 @@ export default function App() {
                               'border-slate-800 bg-slate-950/60 text-slate-200 hover:border-slate-700';
                             if (isSubmitted) {
                               if (isCorrect) {
-                                btnClass = 'border-emerald-500/70 bg-emerald-950/30 text-emerald-200';
+                                btnClass =
+                                  'border-emerald-500/70 bg-emerald-950/30 text-emerald-200';
                               } else if (isSelected && !isCorrect) {
                                 btnClass = 'border-rose-500/70 bg-rose-950/30 text-rose-200';
                               }
@@ -877,7 +1269,8 @@ export default function App() {
                               'border-slate-800 bg-slate-950/60 text-slate-200 hover:border-slate-700';
                             if (isSubmitted) {
                               if (isCorrect) {
-                                btnClass = 'border-emerald-500/70 bg-emerald-950/30 text-emerald-200';
+                                btnClass =
+                                  'border-emerald-500/70 bg-emerald-950/30 text-emerald-200';
                               } else if (isSelected && !isCorrect) {
                                 btnClass = 'border-rose-500/70 bg-rose-950/30 text-rose-200';
                               }
@@ -916,29 +1309,22 @@ export default function App() {
                     {/* Readiness Status & Submit Action */}
                     <div className="pt-3 border-t border-slate-800 space-y-3">
                       {!isSubmitted ? (
-                        <div className="space-y-2.5">
-                          <div className="flex items-center justify-between gap-3">
-                            <button
-                              type="button"
-                              onClick={() => setActiveStage('positioning')}
-                              className="px-3.5 py-2 text-xs font-medium text-slate-300 bg-slate-950 border border-slate-800 rounded-lg hover:text-white transition-colors whitespace-nowrap shrink-0"
-                            >
-                              Back to Positioning
-                            </button>
+                        <div className="flex items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setActiveStage('positioning')}
+                            className="px-3.5 py-2 text-xs font-medium text-slate-300 bg-slate-950 border border-slate-800 rounded-lg hover:text-white transition-colors whitespace-nowrap shrink-0"
+                          >
+                            Back to Positioning
+                          </button>
 
-                            <button
-                              type="button"
-                              disabled={!hasAnyAnswerInput}
-                              onClick={handleEvaluateCase}
-                              className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                                hasAnyAnswerInput
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                                  : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                              }`}
-                            >
-                              Check Answer & Reveal Solution
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={handleEvaluateCase}
+                            className="flex-1 py-2.5 px-4 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition-colors whitespace-nowrap shrink-0"
+                          >
+                            Check Answer & Reveal Solution
+                          </button>
                         </div>
                       ) : (
                         <div className="flex items-center justify-between gap-3">
@@ -1009,14 +1395,12 @@ export default function App() {
                   </div>
 
                   <div className="p-4 rounded-lg bg-slate-950/70 border border-slate-800/90 space-y-1">
-                    <div className="text-xs text-slate-400">2. Patient Positioning</div>
+                    <div className="text-xs text-slate-400">2. Created Patient Position</div>
                     <div className="font-mono text-lg font-bold text-slate-100 tabular-nums">
                       {currentResult.positioningScore}/25 pts
                     </div>
                     <div className="text-xs text-slate-400">
-                      {currentResult.isCorrectPositioning
-                        ? 'Correct Projection Selected'
-                        : `Correct: ${optimalPositioningOption?.projectionName}`}
+                      {currentResult.poseMatchesCount}/5 Pose Parameters Matched
                     </div>
                   </div>
 
@@ -1075,6 +1459,318 @@ export default function App() {
           </div>
         )}
 
+        {/* SECTION: Custom Patient Position & Case Creator Studio */}
+        {activeSection === 'create-position' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="font-display text-2xl font-bold text-slate-100">
+                  Custom Patient Position & Clinical Case Creator
+                </h1>
+                <p className="text-sm text-slate-400 mt-1">
+                  Configure a custom patient posture, click on the Bucky stage with your cursor to set the target Central Ray (CR), and add it to the rotation.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveSection('workbench')}
+                className="px-4 py-2 text-xs font-semibold text-slate-200 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors whitespace-nowrap shrink-0"
+              >
+                Back to Cases
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Interactive Preview Stage to Click & Set Target CR */}
+              <div className="lg:col-span-6 rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
+                <div className="px-4 py-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-sky-400">
+                    Click Stage Below to Set Target Central Ray (CR) Coordinates
+                  </span>
+                  <span className="text-xs font-mono text-emerald-400 tabular-nums">
+                    Target CR: ({customTargetCR.x.toFixed(1)}%, {customTargetCR.y.toFixed(1)}%)
+                  </span>
+                </div>
+                <PositioningCanvas
+                  currentCase={{
+                    ...(RADIOLOGY_CASES.find((c) => c.scanType === customScanType) ||
+                      RADIOLOGY_CASES[0]),
+                    targetCR: {
+                      x: customTargetCR.x,
+                      y: customTargetCR.y,
+                      toleranceRadius: 8,
+                      landmarkName: customLandmarkName,
+                      collimationWidth: 55,
+                      collimationHeight: 50,
+                    },
+                  }}
+                  placedCR={customTargetCR}
+                  onPlaceCR={(coords) => {
+                    soundEngine.playCursorPinClick();
+                    setCustomTargetCR(coords);
+                  }}
+                  userPose={customPose}
+                  collimationScale={100}
+                  isSubmitted={false}
+                />
+              </div>
+
+              {/* Right Form to Configure Custom Patient Position & Diagnosis */}
+              <form
+                onSubmit={handleCreateCustomCase}
+                className="lg:col-span-6 p-6 rounded-xl border border-slate-800 bg-slate-900/50 space-y-5"
+              >
+                <h2 className="font-display text-lg font-bold text-slate-100">
+                  Define Target Patient Position & Clinical Scenario
+                </h2>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2 space-y-1">
+                    <label className="text-xs font-medium text-slate-300">
+                      Clinical Indication / Prompt Title
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">
+                      Patient Age/Sex
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customAgeSex}
+                      onChange={(e) => setCustomAgeSex(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">
+                      Anatomical Region / Scan Template
+                    </label>
+                    <select
+                      value={customScanType}
+                      onChange={(e) =>
+                        setCustomScanType(e.target.value as RadiologyCase['scanType'])
+                      }
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    >
+                      <option value="chest_pneumothorax">Thorax — Chest PA/AP</option>
+                      <option value="wrist_scaphoid">Upper Extremity — Wrist / Scaphoid</option>
+                      <option value="wrist_colles">Upper Extremity — Distal Forearm Lateral</option>
+                      <option value="brain_epidural">Cranium — Axial Head CT</option>
+                      <option value="abdomen_pneumoperitoneum">Thoracoabdominal — Erect Diaphragm</option>
+                      <option value="abdomen_volvulus">Abdomen — Supine KUB</option>
+                      <option value="cervical_odontoid">Cervical Spine — Open-Mouth C1–C2</option>
+                      <option value="neck_croup">Pediatric Airway — Soft-Tissue Neck</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">
+                      Target Central Ray (CR) Landmark Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customLandmarkName}
+                      onChange={(e) => setCustomLandmarkName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                {/* Patient Position Parameters */}
+                <div className="p-4 rounded-lg bg-slate-950/80 border border-slate-800 space-y-3">
+                  <div className="text-xs font-semibold text-sky-400">
+                    Required Patient Position Parameters (Previewed Live on Left)
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-300">Body Posture</label>
+                      <select
+                        value={customPose.bodyPosture}
+                        onChange={(e) =>
+                          setCustomPose((p) => ({
+                            ...p,
+                            bodyPosture: e.target.value as PatientPoseConfig['bodyPosture'],
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100"
+                      >
+                        {BODY_POSTURES.map((bp) => (
+                          <option key={bp} value={bp}>
+                            {bp}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-300">Projection View</label>
+                      <select
+                        value={customPose.projectionView}
+                        onChange={(e) =>
+                          setCustomPose((p) => ({
+                            ...p,
+                            projectionView: e.target.value as PatientPoseConfig['projectionView'],
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100"
+                      >
+                        {PROJECTION_VIEWS.map((pv) => (
+                          <option key={pv} value={pv}>
+                            {pv}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-300">Anatomical Part Maneuver</label>
+                      <select
+                        value={customPose.specialManeuver}
+                        onChange={(e) =>
+                          setCustomPose((p) => ({
+                            ...p,
+                            specialManeuver: e.target.value as PatientPoseConfig['specialManeuver'],
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100"
+                      >
+                        {SPECIAL_MANEUVERS.map((sm) => (
+                          <option key={sm} value={sm}>
+                            {sm}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs text-slate-300">Respiration Phase</label>
+                      <select
+                        value={customPose.respirationPhase}
+                        onChange={(e) =>
+                          setCustomPose((p) => ({
+                            ...p,
+                            respirationPhase: e.target.value as PatientPoseConfig['respirationPhase'],
+                          }))
+                        }
+                        className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-100"
+                      >
+                        {RESPIRATION_PHASES.map((rp) => (
+                          <option key={rp} value={rp}>
+                            {rp}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-300">Target X-Ray Tube Angle:</span>
+                      <span className="font-mono text-sky-300">{customPose.tubeAngleDeg}°</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={30}
+                      step={5}
+                      value={customPose.tubeAngleDeg}
+                      onChange={(e) =>
+                        setCustomPose((p) => ({
+                          ...p,
+                          tubeAngleDeg: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-sky-500 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Target Diagnosis & Sign */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">
+                      Target Primary Diagnosis
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customDisease}
+                      onChange={(e) => setCustomDisease(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-slate-300">
+                      Target Classic Radiological Sign
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={customSign}
+                      onChange={(e) => setCustomSign(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400 font-mono">
+                      Target Lesion X (%) on Scan
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={95}
+                      value={customTargetLesion.x}
+                      onChange={(e) =>
+                        setCustomTargetLesion((p) => ({ ...p, x: Number(e.target.value) }))
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-slate-400 font-mono">
+                      Target Lesion Y (%) on Scan
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={95}
+                      value={customTargetLesion.y}
+                      onChange={(e) =>
+                        setCustomTargetLesion((p) => ({ ...p, y: Number(e.target.value) }))
+                      }
+                      className="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 px-4 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition-colors"
+                >
+                  Save & Launch Custom Patient Position Case
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
         {/* SECTION 2: Radiographic Positioning & Central Ray Reference Guide */}
         {activeSection === 'positioning-guide' && (
           <div className="space-y-6">
@@ -1097,7 +1793,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {RADIOLOGY_CASES.map((c, idx) => {
+              {casesList.map((c, idx) => {
                 const optimalOpt = c.positioningOptions.find(
                   (o) => o.id === c.correctPositioningId
                 );
@@ -1118,6 +1814,10 @@ export default function App() {
                       </h2>
                       <div className="text-xs font-mono text-amber-300">
                         Target Central Ray (CR): {c.targetCR.landmarkName}
+                      </div>
+                      <div className="text-xs font-mono text-emerald-300">
+                        Pose: {c.targetPatientPose.bodyPosture} · {c.targetPatientPose.projectionView} ·{' '}
+                        {c.targetPatientPose.specialManeuver}
                       </div>
                       <p className="text-sm text-slate-300 leading-relaxed">
                         {c.positioningExplanation}
@@ -1166,7 +1866,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {RADIOLOGY_CASES.map((c, idx) => (
+              {casesList.map((c, idx) => (
                 <div
                   key={c.id}
                   className="p-5 rounded-xl border border-slate-800 bg-slate-900/50 space-y-3 flex flex-col justify-between"
@@ -1240,7 +1940,7 @@ export default function App() {
                   <span>Cases Evaluated</span>
                 </div>
                 <div className="font-mono text-2xl font-bold text-slate-100 tabular-nums">
-                  {completedResults.length} / {RADIOLOGY_CASES.length}
+                  {completedResults.length} / {casesList.length}
                 </div>
               </div>
 
@@ -1294,14 +1994,14 @@ export default function App() {
                       <th className="py-3.5 px-4 font-semibold">Case</th>
                       <th className="py-3.5 px-4 font-semibold">Target Diagnosis</th>
                       <th className="py-3.5 px-4 font-semibold font-mono">CR Offset</th>
-                      <th className="py-3.5 px-4 font-semibold font-mono">Positioning</th>
+                      <th className="py-3.5 px-4 font-semibold font-mono">Created Position</th>
                       <th className="py-3.5 px-4 font-semibold font-mono">Lesion Offset</th>
                       <th className="py-3.5 px-4 font-semibold font-mono">Total Score</th>
                       <th className="py-3.5 px-4 font-semibold text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70 text-xs">
-                    {RADIOLOGY_CASES.map((c, idx) => {
+                    {casesList.map((c, idx) => {
                       const res = history[c.id];
                       return (
                         <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
@@ -1313,7 +2013,7 @@ export default function App() {
                             {res ? `${res.crOffsetMm} mm (${res.crScore}/25)` : 'Not Attempted'}
                           </td>
                           <td className="py-3.5 px-4 font-mono tabular-nums text-slate-300">
-                            {res ? `${res.positioningScore}/25` : '—'}
+                            {res ? `${res.positioningScore}/25 (${res.poseMatchesCount}/5)` : '—'}
                           </td>
                           <td className="py-3.5 px-4 font-mono tabular-nums text-slate-300">
                             {res ? `${res.lesionOffsetMm} mm (${res.lesionScore}/25)` : '—'}

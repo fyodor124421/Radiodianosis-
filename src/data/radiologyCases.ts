@@ -16,12 +16,31 @@ export interface PositioningOption {
   respiration: string;
 }
 
+export interface PatientPoseConfig {
+  bodyPosture: 'Erect' | 'Supine' | 'Prone' | 'Lateral Decubitus';
+  projectionView: 'PA' | 'AP' | 'True Lateral' | 'Axial CT';
+  specialManeuver:
+    | 'Shoulders Rolled Forward'
+    | 'Ulnar Deviation (20°)'
+    | 'Open-Mouth Transoral'
+    | 'OML Parallel (No Contrast)'
+    | 'Chin Slightly Extended'
+    | 'Radioulnar Superimposed (90°)'
+    | 'Neutral Standard';
+  tubeAngleDeg: number; // -30 to +30 (0 = perpendicular)
+  respirationPhase:
+    | 'Full Inspiration'
+    | 'Full Expiration'
+    | 'Suspended / Immobility'
+    | 'Phonate "Ahhh"';
+}
+
 export interface RadiologyCase {
   id: string;
   caseNumber: string;
   modality: 'Digital Radiography (DR)' | 'Computed Tomography (CT)' | 'Fluoroscopy / Contrast DR';
   subspecialty: 'Thoracic' | 'Musculoskeletal' | 'Neuroradiology' | 'Abdominal' | 'Emergency Trauma' | 'Pediatric';
-  difficulty: 'Year 1 Resident' | 'Year 2 Resident' | 'Board Prep';
+  difficulty: 'Year 1 Resident' | 'Year 2 Resident' | 'Board Prep' | 'Custom Case';
   patientInfo: {
     ageSex: string;
     chiefComplaint: string;
@@ -38,6 +57,7 @@ export interface RadiologyCase {
     collimationWidth: number; // ideal collimation box % width
     collimationHeight: number; // ideal collimation box % height
   };
+  targetPatientPose: PatientPoseConfig;
   correctPositioningId: string;
   positioningOptions: PositioningOption[];
   positioningExplanation: string;
@@ -83,7 +103,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 118 bpm · BP 96/62 mmHg · RR 28/min · SpO2 89% RA',
     },
     positioningPrompt:
-      'Position the patient and move your cursor to place the Central Ray (CR) for a standard Upright Chest PA projection to evaluate suspected acute pneumothorax.',
+      'Build the patient position (Erect, PA, Shoulders Rolled Forward, Full Inspiration) and move your cursor to place the Central Ray (CR) at T7.',
     targetCR: {
       x: 50,
       y: 36,
@@ -91,6 +111,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'T7 Spinous Process (Inferior Angle of Scapula)',
       collimationWidth: 64,
       collimationHeight: 54,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Erect',
+      projectionView: 'PA',
+      specialManeuver: 'Shoulders Rolled Forward',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Full Inspiration',
     },
     correctPositioningId: 'pa-erect-chest',
     positioningOptions: [
@@ -179,7 +206,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 76 bpm · BP 118/74 mmHg · Afebrile',
     },
     positioningPrompt:
-      'Standard PA wrist views often foreshorten the scaphoid bone. Position the wrist and place the Central Ray (CR) with your cursor to elongate the scaphoid perpendicular to the receptor.',
+      'Create the specialized scaphoid wrist position (PA, Ulnar Deviation 20°) and place the Central Ray (CR) cursor over the anatomical snuffbox.',
     targetCR: {
       x: 44,
       y: 52,
@@ -187,6 +214,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'Scaphoid / Mid-Carpal Radial Snuffbox',
       collimationWidth: 42,
       collimationHeight: 46,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Erect',
+      projectionView: 'PA',
+      specialManeuver: 'Ulnar Deviation (20°)',
+      tubeAngleDeg: 15,
+      respirationPhase: 'Suspended / Immobility',
     },
     correctPositioningId: 'pa-ulnar-deviation',
     positioningOptions: [
@@ -250,7 +284,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
     signOptions: [
       'Transverse Scaphoid Waist Lucency & Snuffbox Fat Pad Obliteration',
       'Piece-of-Pie Sign of the Lunate on PA View',
-      'widened Scapholunate Interval > 3 mm',
+      'Widened Scapholunate Interval > 3 mm',
       'Dinner Fork Dorsal Displacement of Distal Radius',
     ],
     clinicalPearl:
@@ -275,7 +309,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 52 bpm · BP 178/96 mmHg (Cushing Triad) · GCS 8 (E2V2M4)',
     },
     positioningPrompt:
-      'Position the patient in the CT gantry and place the laser reference cursor along the cranial baseline for an Emergency Non-Contrast Axial Head CT.',
+      'Create the patient position (Supine, Axial CT, OML Parallel without contrast) and place the laser reference cursor along the Orbitomeatal Line.',
     targetCR: {
       x: 50,
       y: 22,
@@ -283,6 +317,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'Orbitomeatal Line (OML) / Glabella-to-EAM Plane',
       collimationWidth: 46,
       collimationHeight: 38,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Supine',
+      projectionView: 'Axial CT',
+      specialManeuver: 'OML Parallel (No Contrast)',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Suspended / Immobility',
     },
     correctPositioningId: 'ct-head-oml',
     positioningOptions: [
@@ -371,7 +412,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 114 bpm · BP 104/68 mmHg · Temp 38.3°C · RR 24/min',
     },
     positioningPrompt:
-      'To detect as little as 1–2 mL of free intraperitoneal gas from a perforated viscus, position the patient and place the Central Ray (CR) cursor for the highest-sensitivity upright radiograph.',
+      'Create the upright patient position (Erect, PA, Horizontal 0° Beam) and place the Central Ray (CR) cursor tangential to the diaphragmatic domes.',
     targetCR: {
       x: 50,
       y: 44,
@@ -379,6 +420,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'Erect Chest / Bilateral Hemidiaphragms (T7–T10 Window)',
       collimationWidth: 64,
       collimationHeight: 54,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Erect',
+      projectionView: 'PA',
+      specialManeuver: 'Shoulders Rolled Forward',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Full Inspiration',
     },
     correctPositioningId: 'erect-chest-diaphragm',
     positioningOptions: [
@@ -425,7 +473,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
     },
     anatomicalRegions: [
       { id: 'r-subdiaphragm-air', label: 'Subdiaphragmatic Free Air Crescent (Over Liver Dome)', x: 34, y: 52, radius: 10, huValue: '-975 HU', tissueType: 'Intraperitoneal Free Gas' },
-      { id: 'l-subdiaphragm-air', label: 'Left Subdiaphragmatic Free Gas & Gastric Fundus', x: 66, y: 54, radius: 10, huValue: '-940 HU', tissueType: 'Free Gas / Gastric Bubble' },
+      { id: 'l-subdiaphragm-air', label: 'Left Subdiaphragmatic Free Gas & Gastric Bubble', x: 66, y: 54, radius: 10, huValue: '-940 HU', tissueType: 'Free Gas / Gastric Bubble' },
       { id: 'liver-parenchyma', label: 'Hepatic Parenchyma (Displaced Inferiorly)', x: 34, y: 66, radius: 13, huValue: '+58 HU', tissueType: 'Hepatic Soft Tissue' },
       { id: 'rigler-bowel', label: 'Bowel Loop Demonstrating Rigler Double-Wall Sign', x: 52, y: 74, radius: 11, huValue: '-620 HU', tissueType: 'Serosal + Luminal Gas' },
       { id: 'heart-base', label: 'Cardiac Silhouette Above Diaphragm', x: 53, y: 36, radius: 12, huValue: '+46 HU', tissueType: 'Mediastinum' },
@@ -466,7 +514,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 98 bpm · BP 132/82 mmHg · Temp 37.4°C · WBC 13.8k',
     },
     positioningPrompt:
-      'Position the patient and move your cursor to place the Central Ray (CR) for a Supine AP Abdomen (KUB) projection ensuring inclusion of the pubic symphysis.',
+      'Create the patient position (Supine, AP, Full Expiration) and move your cursor to place the Central Ray (CR) at the level of the iliac crests (L4–L5).',
     targetCR: {
       x: 50,
       y: 56,
@@ -474,6 +522,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'Level of Iliac Crests (L4–L5 Interspace)',
       collimationWidth: 62,
       collimationHeight: 58,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Supine',
+      projectionView: 'AP',
+      specialManeuver: 'Neutral Standard',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Full Expiration',
     },
     correctPositioningId: 'ap-supine-kub',
     positioningOptions: [
@@ -561,7 +616,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 82 bpm · BP 138/84 mmHg · SpO2 98% RA',
     },
     positioningPrompt:
-      'Standard AP cervical spine views superimpose the teeth and occiput over C1–C2. Move your cursor to place the Central Ray (CR) and align the patient for an AP Open-Mouth (Transoral) C1–C2 Odontoid view.',
+      'Create the transoral trauma position (Supine, AP, Open-Mouth Transoral, Phonate "Ahhh") and place the Central Ray (CR) cursor through the open mouth.',
     targetCR: {
       x: 50,
       y: 25,
@@ -569,6 +624,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'Center of Open Mouth (Lower Margin of Upper Incisors to Mastoid Tip)',
       collimationWidth: 36,
       collimationHeight: 36,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Supine',
+      projectionView: 'AP',
+      specialManeuver: 'Open-Mouth Transoral',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Phonate "Ahhh"',
     },
     correctPositioningId: 'ap-open-mouth',
     positioningOptions: [
@@ -657,7 +719,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 132 bpm · RR 32/min · Temp 38.1°C · SpO2 96% RA',
     },
     positioningPrompt:
-      'Position the pediatric patient and move your cursor to place the Central Ray (CR) for an AP Soft-Tissue Neck radiograph to evaluate the subglottic airway.',
+      'Create the pediatric airway position (Erect, AP, Chin Slightly Extended, Full Inspiration) and place the Central Ray (CR) cursor at C4–C5.',
     targetCR: {
       x: 50,
       y: 28,
@@ -665,6 +727,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'C4–C5 Level (Inferior Margin of Thyroid Cartilage)',
       collimationWidth: 40,
       collimationHeight: 40,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Erect',
+      projectionView: 'AP',
+      specialManeuver: 'Chin Slightly Extended',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Full Inspiration',
     },
     correctPositioningId: 'ap-soft-neck',
     positioningOptions: [
@@ -752,7 +821,7 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       vitals: 'HR 84 bpm · BP 142/86 mmHg · Neurovascularly intact distally',
     },
     positioningPrompt:
-      'To measure dorsal angulation and radial tilt accurately, position the patient and place the Central Ray (CR) cursor for a True Lateral Wrist projection.',
+      'Create the True Lateral wrist position (True Lateral, Radioulnar Superimposed 90°) and place the Central Ray (CR) cursor at the radiocarpal joint.',
     targetCR: {
       x: 44,
       y: 52,
@@ -760,6 +829,13 @@ export const RADIOLOGY_CASES: RadiologyCase[] = [
       landmarkName: 'Mid-Carpal / Radial Styloid Joint Line (True Lateral)',
       collimationWidth: 42,
       collimationHeight: 48,
+    },
+    targetPatientPose: {
+      bodyPosture: 'Erect',
+      projectionView: 'True Lateral',
+      specialManeuver: 'Radioulnar Superimposed (90°)',
+      tubeAngleDeg: 0,
+      respirationPhase: 'Suspended / Immobility',
     },
     correctPositioningId: 'lateral-wrist-true',
     positioningOptions: [
